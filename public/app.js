@@ -53,6 +53,7 @@ function currentRoomId() {
 }
 
 function showToast(message) {
+  if (!toast) return;
   toast.textContent = message;
   toast.classList.add("visible");
   window.clearTimeout(showToast.timer);
@@ -60,9 +61,13 @@ function showToast(message) {
 }
 
 async function createRoom(mode = "human", difficulty = "easy") {
-  const response = await fetch(`/api/new-room?mode=${mode}&difficulty=${difficulty}`);
-  const { roomId } = await response.json();
-  window.location.href = `/room/${roomId}`;
+  try {
+    const response = await fetch(`/api/new-room?mode=${mode}&difficulty=${difficulty}`);
+    const { roomId } = await response.json();
+    window.location.href = `/room/${roomId}`;
+  } catch (error) {
+    console.error("Failed to create room:", error);
+  }
 }
 
 function webSocketUrl() {
@@ -84,28 +89,30 @@ function createLobbySocket() {
 }
 
 function playGameStateSound(prevState, newState) {
-  // Don't play sounds on initial load, only on actual new moves
   if (!prevState || !newState.lastMove || prevState.turn === newState.turn) return;
 
-  // 1. Play Check Sound
   if (newState.status === "check" || newState.status === "checkmate") {
-    checkSound.currentTime = 0;
-    checkSound.play().catch(() => console.log("Audio blocked by browser"));
+    if (checkSound) {
+      checkSound.currentTime = 0;
+      checkSound.play().catch(() => console.log("Audio blocked"));
+    }
     return;
   }
 
-  // 2. Determine if it was a capture by comparing piece counts
   const prevPiecesCount = Object.keys(fenToBoard(prevState.fen)).length;
   const newPiecesCount = Object.keys(fenToBoard(newState.fen)).length;
   const wasCapture = newPiecesCount < prevPiecesCount;
 
-  // 3. Play Capture or Move Sound
   if (wasCapture) {
-    captureSound.currentTime = 0;
-    captureSound.play().catch(() => console.log("Audio blocked by browser"));
+    if (captureSound) {
+      captureSound.currentTime = 0;
+      captureSound.play().catch(() => console.log("Audio blocked"));
+    }
   } else {
-    moveSound.currentTime = 0;
-    moveSound.play().catch(() => console.log("Audio blocked by browser"));
+    if (moveSound) {
+      moveSound.currentTime = 0;
+      moveSound.play().catch(() => console.log("Audio blocked"));
+    }
   }
 }
 
@@ -118,12 +125,11 @@ function connect(roomId) {
     const message = JSON.parse(event.data);
     if (message.type === "role") {
       role = message.role;
-      roleLabel.textContent = role[0].toUpperCase() + role.slice(1);
+      if (roleLabel) roleLabel.textContent = role[0].toUpperCase() + role.slice(1);
       return;
     }
     if (message.type === "match_found") return;
     
-    // Updated State Logic with Sound Trigger
     if (message.type === "state") {
       const previousState = currentState; 
       currentState = message;
@@ -138,8 +144,8 @@ function connect(roomId) {
     }
   });
   socket.addEventListener("close", () => {
-    turnPill.textContent = "Offline";
-    statusBox.textContent = "Connection lost. Refresh the room to reconnect.";
+    if (turnPill) turnPill.textContent = "Offline";
+    if (statusBox) statusBox.textContent = "Connection lost. Refresh the room to reconnect.";
   });
 }
 
@@ -229,7 +235,7 @@ function startDrag(event, square) {
     ghost: createDragGhost(piece, event.clientX, event.clientY),
     moved: false,
   };
-  boardEl.classList.add("dragging-board");
+  if (boardEl) boardEl.classList.add("dragging-board");
   event.currentTarget.setPointerCapture?.(event.pointerId);
   event.preventDefault();
   renderBoard();
@@ -248,7 +254,7 @@ function endDrag(event) {
   dragState.ghost.remove();
   dragState = null;
   ignoreClickUntil = Date.now() + 120;
-  boardEl.classList.remove("dragging-board");
+  if (boardEl) boardEl.classList.remove("dragging-board");
 
   if (target && targetsFrom(from).has(target)) {
     requestMove(from, target);
@@ -270,20 +276,26 @@ function createDragGhost(piece, x, y) {
 
 function render() {
   const roomId = currentRoomId();
-  roomName.textContent = roomId;
-  turnPill.textContent = statusLabel(currentState);
-  whiteStatus.textContent = currentState.players.white ? "At board" : "Waiting";
-  blackStatus.textContent = currentState.mode === "bot"
-    ? `${capitalize(currentState.difficulty)} bot`
-    : currentState.players.black ? "At board" : "Waiting";
-  statusBox.textContent = detailStatus(currentState);
-  movesList.textContent = formatMoves(currentState.history);
-  drawButton.textContent = currentState.drawOffer && currentState.drawOffer !== role ? "Accept Draw" : "Offer Draw";
+  if (roomName) roomName.textContent = roomId;
+  if (turnPill) turnPill.textContent = statusLabel(currentState);
+  if (whiteStatus) whiteStatus.textContent = currentState.players.white ? "At board" : "Waiting";
+  
+  if (blackStatus) {
+    blackStatus.textContent = currentState.mode === "bot"
+      ? `${capitalize(currentState.difficulty)} bot`
+      : currentState.players.black ? "At board" : "Waiting";
+  }
+  
+  if (statusBox) statusBox.textContent = detailStatus(currentState);
+  if (movesList) movesList.textContent = formatMoves(currentState.history);
+  if (drawButton) drawButton.textContent = currentState.drawOffer && currentState.drawOffer !== role ? "Accept Draw" : "Offer Draw";
+  
   renderCaptures();
   renderBoard();
 }
 
 function renderBoard() {
+  if (!boardEl) return;
   const targets = targetsFrom(selectedSquare);
   boardEl.innerHTML = "";
   for (const square of orientedSquares()) {
@@ -331,8 +343,8 @@ function renderCaptures() {
   Object.values(board).forEach((piece) => {
     counts[piece.color][piece.type] -= 1;
   });
-  whiteCaptures.innerHTML = capturedText(counts.w, "w");
-  blackCaptures.innerHTML = capturedText(counts.b, "b");
+  if (whiteCaptures) whiteCaptures.innerHTML = capturedText(counts.w, "w");
+  if (blackCaptures) blackCaptures.innerHTML = capturedText(counts.b, "b");
 }
 
 function capturedText(counts, color) {
@@ -401,4 +413,197 @@ botButtons.forEach((button) => {
 });
 joinForm?.addEventListener("submit", (event) => {
   event.preventDefault();
-  const roomId = roomCodeInput
+  if (!roomCodeInput) return;
+  const roomId = roomCodeInput.value.trim().replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!roomId) {
+    showToast("Enter a room code.");
+    return;
+  }
+  window.location.href = `/room/${roomId}`;
+});
+document.addEventListener("pointermove", moveDrag);
+document.addEventListener("pointerup", endDrag);
+document.addEventListener("pointercancel", endDrag);
+
+function renderPreviewBoard() {
+  if (!previewBoard) return;
+  const setup = [
+    ["br", "bn", "bb", "bq", "bk", "bb", "bn", "br"],
+    ["bp", "bp", "bp", "bp", "bp", "bp", "bp", "bp"],
+    [null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null],
+    [null, null, null, null, null, null, null, null],
+    ["wp", "wp", "wp", "wp", "wp", "wp", "wp", "wp"],
+    ["wr", "wn", "wb", "wq", "wk", "wb", "wn", "wr"],
+  ];
+  previewBoard.innerHTML = "";
+  setup.flat().forEach((piece, index) => {
+    const square = document.createElement("span");
+    square.className = `preview-square ${Math.floor(index / 8 + index % 8) % 2 === 0 ? "dark" : "light"} ${piece?.startsWith("w") ? "white-piece" : ""} ${piece?.startsWith("b") ? "black-piece" : ""}`;
+    square.textContent = piece ? pieceGlyphs[piece] : "";
+    previewBoard.append(square);
+  });
+}
+
+const roomId = currentRoomId();
+if (roomId) {
+  if (homeView) homeView.classList.add("hidden");
+  if (gameView) gameView.classList.remove("hidden");
+  connect(roomId);
+} else {
+  if (homeView) homeView.classList.remove("hidden");
+  if (gameView) gameView.classList.add("hidden");
+  renderPreviewBoard();
+}
+
+const designTargets = {
+  title: document.querySelector(".hero-title"),
+  actions: document.querySelector(".home-actions"),
+  board: document.querySelector(".preview-board"),
+};
+let designMode = false;
+let designAction = null;
+let designLayout = {};
+
+function toggleDesignMode() {
+  if (roomId) return;
+  designMode = !designMode;
+  document.body.classList.toggle("design-mode", designMode);
+
+  if (designMode) {
+    Object.entries(designTargets).forEach(([key, element]) => {
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      designLayout[key] = designLayout[key] || rectToLayout(rect);
+      element.classList.add("design-target");
+      element.dataset.designKey = key;
+      element.style.position = "fixed";
+      element.style.top = `${rect.top}px`;
+      element.style.left = `${rect.left}px`;
+      element.style.width = `${rect.width}px`;
+      element.style.height = `${rect.height}px`;
+      element.style.zIndex = "10";
+      addDesignHandles(element);
+    });
+    showToast("Design Mode on. Drag or resize, then release to save.");
+  } else {
+    Object.values(designTargets).forEach((element) => {
+      element?.classList.remove("design-target");
+      element?.querySelectorAll(".design-handle").forEach((handle) => handle.remove());
+    });
+    showToast("Design Mode off.");
+  }
+}
+
+function rectToLayout(rect) {
+  return {
+    top: Math.round(rect.top),
+    left: Math.round(rect.left),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+}
+
+function addDesignHandles(element) {
+  if (element.querySelector(".design-handle")) return;
+  ["nw", "n", "ne", "e", "se", "s", "sw", "w"].forEach((side) => {
+    const handle = document.createElement("span");
+    handle.className = `design-handle design-handle-${side}`;
+    handle.dataset.resize = side;
+    element.append(handle);
+  });
+}
+
+function startDesignAction(event) {
+  if (!designMode) return;
+  const handle = event.target.closest(".design-handle");
+  const target = event.target.closest(".design-target");
+  if (!target) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  const rect = target.getBoundingClientRect();
+  designAction = {
+    element: target,
+    key: target.dataset.designKey,
+    resize: handle?.dataset.resize || null,
+    startX: event.clientX,
+    startY: event.clientY,
+    startRect: rectToLayout(rect),
+  };
+  target.classList.add("is-designing");
+}
+
+function moveDesignAction(event) {
+  if (!designAction) return;
+  event.preventDefault();
+  const dx = event.clientX - designAction.startX;
+  const dy = event.clientY - designAction.startY;
+  const next = { ...designAction.startRect };
+
+  if (!designAction.resize) {
+    next.left += dx;
+    next.top += dy;
+  } else {
+    if (designAction.resize.includes("e")) next.width += dx;
+    if (designAction.resize.includes("s")) next.height += dy;
+    if (designAction.resize.includes("w")) {
+      next.left += dx;
+      next.width -= dx;
+    }
+    if (designAction.resize.includes("n")) {
+      next.top += dy;
+      next.height -= dy;
+    }
+  }
+
+  next.width = Math.max(80, next.width);
+  next.height = Math.max(38, next.height);
+  next.left = Math.max(0, next.left);
+  next.top = Math.max(0, next.top);
+  applyDesignLayout(designAction.element, next);
+  designLayout[designAction.key] = next;
+}
+
+async function endDesignAction() {
+  if (!designAction) return;
+  designAction.element.classList.remove("is-designing");
+  designAction = null;
+  await saveDesignLayout();
+}
+
+function applyDesignLayout(element, layout) {
+  element.style.left = `${layout.left}px`;
+  element.style.top = `${layout.top}px`;
+  element.style.width = `${layout.width}px`;
+  element.style.height = `${layout.height}px`;
+}
+
+async function saveDesignLayout() {
+  try {
+    const response = await fetch("/api/design-layout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: designLayout }),
+    });
+    if (!response.ok) throw new Error("Save failed");
+    showToast("Design saved to styles.css.");
+  } catch {
+    showToast("Design save failed. Restart the local server if needed.");
+  }
+}
+
+document.addEventListener("keydown", (event) => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
+    event.preventDefault();
+    toggleDesignMode();
+  }
+});
+document.addEventListener("pointerdown", startDesignAction);
+document.addEventListener("pointermove", moveDesignAction);
+document.addEventListener("pointerup", endDesignAction);
+document.addEventListener("pointercancel", endDesignAction);
